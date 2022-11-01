@@ -1,4 +1,4 @@
-name: ldm
+name: dreambooth
 channels:
   - pytorch
   - defaults
@@ -26,6 +26,7 @@ dependencies:
     - transformers==4.18.0
     - torchmetrics==0.6.0
     - kornia==0.6
+    - captionizer==1.0.1
     - -e git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers
     - -e git+https://github.com/openai/CLIP.git@main#egg=clip
     - -e .

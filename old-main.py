@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-
 import argparse, os, sys, datetime, glob, importlib, csv
-from ldm.modules.pruningckptio import PruningCheckpointIO
 import numpy as np
 import time
 import torch
@@ -23,9 +20,6 @@ from pytorch_lightning.utilities import rank_zero_info
 
 from ldm.data.base import Txt2ImgIterableBaseDataset
 from ldm.util import instantiate_from_config
-
-## Un-comment this for windows
-## os.environ["PL_TORCH_DISTRIBUTED_BACKEND"] = "gloo"
 
 def load_model_from_config(config, ckpt, verbose=False):
     print(f"Loading model from {ckpt}")
@@ -145,31 +139,12 @@ def get_parser(**parser_kwargs):
     )
 
     parser.add_argument(
-        "--datadir_in_name",
-        type=str2bool,
-        nargs="?",
-        const=True,
-        default=True,
+        "--datadir_in_name", 
+        type=str2bool, 
+        nargs="?", 
+        const=True, 
+        default=True, 
         help="Prepend the final directory in the data_root to the output directory name")
-
-    parser.add_argument(
-        "--max_training_steps",
-        type=int,
-        required=True,
-        help="Number of training steps to run")
-
-    parser.add_argument(
-        "--token",
-        type=str,
-        required=True,
-        help="Unique token you want to represent your trained model. Ex: firstNameLastName.")
-
-    parser.add_argument("--token_only", 
-        type=str2bool,
-        const=True,
-        default=False,
-        nargs="?",
-        help="Train only using the token and no class.")
 
     parser.add_argument("--actual_resume", 
         type=str,
@@ -183,7 +158,7 @@ def get_parser(**parser_kwargs):
     
     parser.add_argument("--reg_data_root", 
         type=str, 
-        required=False, 
+        required=True, 
         help="Path to directory with regularization images")
 
     parser.add_argument("--embedding_manager_ckpt", 
@@ -192,13 +167,13 @@ def get_parser(**parser_kwargs):
         help="Initialize embedding manager from a checkpoint")
 
     parser.add_argument("--class_word", 
-        type=str,
-        required=False,
-        help="Match class_word to the category of images you want to train. Example: 'man', 'woman', or 'dog'.")
-
-    parser.add_argument("--init_words", 
         type=str, 
-        help="Comma separated list of words used to initialize the embeddigs for training.")
+        default="dog",
+        help="Placeholder token which will be used to denote the concept in future prompts")
+
+    parser.add_argument("--init_word", 
+        type=str, 
+        help="Word to use as source for initial token embedding")
 
     return parser
 
@@ -293,13 +268,10 @@ class DataModuleFromConfig(pl.LightningDataModule):
             init_fn = worker_init_fn
         else:
             init_fn = None
-
         train_set = self.datasets["train"]
-        if 'reg' in self.datasets:
-            reg_set = self.datasets["reg"]
-            train_set = ConcatDataset(train_set, reg_set)
-
-        return DataLoader(train_set, batch_size=self.batch_size,
+        reg_set = self.datasets["reg"]
+        concat_dataset = ConcatDataset(train_set, reg_set)
+        return DataLoader(concat_dataset, batch_size=self.batch_size,
                           num_workers=self.num_workers, shuffle=False if is_iterable_dataset else True,
                           worker_init_fn=init_fn)
 
@@ -427,7 +399,7 @@ class ImageLogger(Callback):
             grid = grid.transpose(0, 1).transpose(1, 2).squeeze(-1)
             grid = grid.numpy()
             grid = (grid * 255).astype(np.uint8)
-            filename = "{}_globalstep-{:05}_epoch-{:01}_batch-{:04}.jpg".format(
+            filename = "{}_gs-{:06}_e-{:06}_b-{:06}.jpg".format(
                 k,
                 global_step,
                 current_epoch,
@@ -484,12 +456,11 @@ class ImageLogger(Callback):
             self.log_img(pl_module, batch, batch_idx, split="train")
 
     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
-        pass
-        #if not self.disabled and pl_module.global_step > 0:
-            #self.log_img(pl_module, batch, batch_idx, split="val")
-        #if hasattr(pl_module, 'calibrate_grad_norm'):
-            #if (pl_module.calibrate_grad_norm and batch_idx % 25 == 0) and batch_idx > 0:
-                #self.log_gradients(trainer, pl_module, batch_idx=batch_idx)
+        if not self.disabled and pl_module.global_step > 0:
+            self.log_img(pl_module, batch, batch_idx, split="val")
+        if hasattr(pl_module, 'calibrate_grad_norm'):
+            if (pl_module.calibrate_grad_norm and batch_idx % 25 == 0) and batch_idx > 0:
+                self.log_gradients(trainer, pl_module, batch_idx=batch_idx)
 
 
 class CUDACallback(Callback):
@@ -634,13 +605,10 @@ if __name__ == "__main__":
         cli = OmegaConf.from_dotlist(unknown)
         config = OmegaConf.merge(*configs, cli)
         lightning_config = config.pop("lightning", OmegaConf.create())
-
         # merge trainer cli with config
         trainer_config = lightning_config.get("trainer", OmegaConf.create())
-
-        # Set the steps
-        trainer_config.max_steps = opt.max_training_steps
-
+        # default to ddp
+        trainer_config["accelerator"] = "ddp"
         for k in nondefault_trainer_args(opt):
             trainer_config[k] = getattr(opt, k)
         if not "gpus" in trainer_config:
@@ -653,33 +621,18 @@ if __name__ == "__main__":
         trainer_opt = argparse.Namespace(**trainer_config)
         lightning_config.trainer = trainer_config
 
-        if opt.init_words:
-            config.model.params.personalization_config.params.initializer_words = [ 
-                    init_word.strip() for init_word in opt.init_words.split(',')
-                ]
+        # model
+
+        # config.model.params.personalization_config.params.init_word = opt.init_word
+        # config.model.params.personalization_config.params.embedding_manager_ckpt = opt.embedding_manager_ckpt
+        # config.model.params.personalization_config.params.placeholder_tokens = opt.placeholder_tokens
 
         # if opt.init_word:
         #     config.model.params.personalization_config.params.initializer_words[0] = opt.init_word
-
-        # Setup the token and class word to get passed to personalized.py
-        if not opt.reg_data_root:
-            config.data.params.reg = None
-        else:
-            config.data.params.reg.params.data_root = opt.reg_data_root
-            config.data.params.reg.params.coarse_class_text = opt.class_word
-            config.data.params.reg.params.placeholder_token = opt.token
-        
-
-        if opt.class_word:
-            config.data.params.train.params.coarse_class_text = opt.class_word
-            config.data.params.validation.params.coarse_class_text = opt.class_word
-
-        config.data.params.train.params.data_root = opt.data_root
-        config.data.params.train.params.placeholder_token = opt.token
-        config.data.params.train.params.token_only = opt.token_only or not opt.class_word
-
-        config.data.params.validation.params.placeholder_token = opt.token
-        config.data.params.validation.params.data_root = opt.data_root
+            
+        config.data.params.train.params.placeholder_token = opt.class_word
+        config.data.params.reg.params.placeholder_token = opt.class_word
+        config.data.params.validation.params.placeholder_token = opt.class_word
 
         if opt.actual_resume:
             model = load_model_from_config(config, opt.actual_resume)
@@ -783,11 +736,12 @@ if __name__ == "__main__":
             callbacks_cfg = OmegaConf.create()
 
         if 'metrics_over_trainsteps_checkpoint' in callbacks_cfg:
-            print('Caution: Saving checkpoints every n train steps without deleting. This might require some free space.')
+            print(
+                'Caution: Saving checkpoints every n train steps without deleting. This might require some free space.')
             default_metrics_over_trainsteps_ckpt_dict = {
-                'metrics_over_trainsteps_checkpoint': {
-                    "target": 'pytorch_lightning.callbacks.ModelCheckpoint',
-                    'params': {
+                'metrics_over_trainsteps_checkpoint':
+                    {"target": 'pytorch_lightning.callbacks.ModelCheckpoint',
+                     'params': {
                          "dirpath": os.path.join(ckptdir, 'trainstep_checkpoints'),
                          "filename": "{epoch:06}-{step:09}",
                          "verbose": True,
@@ -795,9 +749,8 @@ if __name__ == "__main__":
                          'every_n_train_steps': 10000,
                          'save_weights_only': True
                      }
-                }
+                     }
             }
-
             default_callbacks_cfg.update(default_metrics_over_trainsteps_ckpt_dict)
 
         callbacks_cfg = OmegaConf.merge(default_callbacks_cfg, callbacks_cfg)
@@ -808,13 +761,17 @@ if __name__ == "__main__":
 
         trainer_kwargs["callbacks"] = [instantiate_from_config(callbacks_cfg[k]) for k in callbacks_cfg]
         trainer_kwargs["max_steps"] = trainer_opt.max_steps
-        trainer_kwargs["plugins"] = PruningCheckpointIO()
-    
+
         trainer = Trainer.from_argparse_args(trainer_opt, **trainer_kwargs)
         trainer.logdir = logdir  ###
 
+        # data
+        config.data.params.train.params.data_root = opt.data_root
+        config.data.params.reg.params.data_root = opt.reg_data_root
+        config.data.params.validation.params.data_root = opt.data_root
         data = instantiate_from_config(config.data)
 
+        data = instantiate_from_config(config.data)
         # NOTE according to https://pytorch-lightning.readthedocs.io/en/latest/datamodules.html
         # calling these ourselves should not be necessary but it is.
         # lightning still takes care of proper multiprocessing though
@@ -851,7 +808,7 @@ if __name__ == "__main__":
         def melk(*args, **kwargs):
             # run all checkpoint hooks
             if trainer.global_rank == 0:
-                print("Here comes the checkpoint...")
+                print("Summoning checkpoint.")
                 ckpt_path = os.path.join(ckptdir, "last.ckpt")
                 trainer.save_checkpoint(ckpt_path)
 
@@ -864,12 +821,8 @@ if __name__ == "__main__":
 
         import signal
 
-
-        # Changed to work with windows
-        signal.signal(signal.SIGTERM, melk)
-        #signal.signal(signal.SIGUSR1, melk)
-        signal.signal(signal.SIGTERM, divein)
-        #signal.signal(signal.SIGUSR2, divein)
+        signal.signal(signal.SIGUSR1, melk)
+        signal.signal(signal.SIGUSR2, divein)
 
         # run
         if opt.train:
@@ -896,5 +849,4 @@ if __name__ == "__main__":
             os.makedirs(os.path.split(dst)[0], exist_ok=True)
             os.rename(logdir, dst)
         if trainer.global_rank == 0:
-            print("Training complete. max_training_steps reached or we blew up.")
-            # print(trainer.profiler.summary())
+            print(trainer.profiler.summary())

@@ -438,6 +438,7 @@ class LatentDiffusion(DDPM):
                  personalization_config,
                  num_timesteps_cond=None,
                  cond_stage_key="image",
+                 main_stage_trainable=True,
                  cond_stage_trainable=False,
                  concat_mode=True,
                  cond_stage_forward=None,
@@ -462,6 +463,7 @@ class LatentDiffusion(DDPM):
         super().__init__(conditioning_key=conditioning_key, *args, **kwargs)
         self.concat_mode = concat_mode
         self.cond_stage_trainable = cond_stage_trainable
+        self.main_stage_trainable = main_stage_trainable
         self.cond_stage_key = cond_stage_key
 
         try:
@@ -495,6 +497,16 @@ class LatentDiffusion(DDPM):
             self.model.train = disabled_train
             for param in self.model.parameters():
                 param.requires_grad = False
+        elif not self.main_stage_trainable:
+            self.model.eval()
+            self.model.train = disabled_train
+            for param in self.model.parameters():
+                param.requires_grad = False
+
+            # Checkpointing requires grad
+            for name, module in self.model.named_modules():
+                if type(module).__name__ == 'ResBlock':
+                    module.use_checkpoint = False
         
         self.embedding_manager = None
 
@@ -1451,19 +1463,24 @@ class LatentDiffusion(DDPM):
             else: # Otherwise, train only embedding
                 opt = torch.optim.AdamW(embedding_params, lr=lr)
         else:
-            params = list(self.model.parameters())
+            params = []
+            if self.main_stage_trainable:
+                print(f'{self.__class__.__name__}: Optimizing main stage params')
+                params = params + list(self.model.parameters())
             if self.cond_stage_trainable:
-                print(f"{self.__class__.__name__}: Also optimizing conditioner params!")
+                print(f'{self.__class__.__name__}: Optimizing conditioner params')
                 params = params + list(self.cond_stage_model.parameters())
             if self.learn_logvar:
-                print('Diffusion model optimizing logvar')
+                print(f'{self.__class__.__name__}: Diffusion model optimizing logvar')
                 params.append(self.logvar)
-
+            
+            print(f'Optimizing {len(params)} parameters')
             opt = torch.optim.AdamW(params, lr=lr)
 
         return opt
 
     def configure_opt_embedding(self):
+        print('CALLED configure_opt_embedding')
 
         self.cond_stage_model.eval()
         self.cond_stage_model.train = disabled_train
@@ -1483,6 +1500,7 @@ class LatentDiffusion(DDPM):
         return torch.optim.AdamW(params, lr=lr)
 
     def configure_opt_model(self):
+        print('CALLED configure_opt_model')
 
         for param in self.cond_stage_model.parameters():
             param.requires_grad = True

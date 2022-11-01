@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.0e-06
+  base_learning_rate: 5.0e-06
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     reg_weight: 1.0
@@ -12,6 +12,7 @@ model:
     cond_stage_key: caption
     image_size: 64
     channels: 4
+    main_stage_trainable: false  # experimental
     cond_stage_trainable: true   # Note: different from the one we trained before
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
@@ -19,7 +20,7 @@ model:
     use_ema: False
     embedding_reg_weight: 0.0
     unfreeze_model: True
-    model_lr: 1.0e-6
+    model_lr: 5.0e-6
 
     personalization_config:
       target: ldm.modules.embedding_manager.EmbeddingManager
@@ -44,7 +45,7 @@ model:
         use_spatial_transformer: True
         transformer_depth: 1
         context_dim: 768
-        use_checkpoint: True
+        use_checkpoint: False # should be True if main_stage_trainable is True
         legacy: False
 
     first_stage_config:
@@ -72,12 +73,14 @@ model:
 
     cond_stage_config:
       target: ldm.modules.encoders.modules.FrozenCLIPEmbedder
-
+      #params:
+        #version: laion/CLIP-ViT-L-14-laion2B-s32B-b82K # experimental
+          
 data:
   target: main.DataModuleFromConfig
   params:
     batch_size: 1
-    num_workers: 2
+    num_workers: 1
     wrap: false
     train:
       target: ldm.data.personalized.PersonalizedBase
@@ -85,7 +88,10 @@ data:
         size: 512
         set: train
         per_image_tokens: false
-        repeats: 100
+        repeats: 1
+        flip_p: 0.0 # For photos of people
+        interpolation: lanczos
+        center_crop: true
     reg:
       target: ldm.data.personalized.PersonalizedBase
       params:
@@ -101,7 +107,10 @@ data:
         size: 512
         set: val
         per_image_tokens: false
-        repeats: 10
+        repeats: 1
+        flip_p: 0.0
+        interpolation: lanczos
+        center_crop: true
 
 lightning:
   modelcheckpoint:
@@ -111,10 +120,12 @@ lightning:
     image_logger:
       target: main.ImageLogger
       params:
-        batch_frequency: 500
-        max_images: 8
+        batch_frequency: 50
+        max_images: 16
         increase_log_steps: False
+        log_images_kwargs:
+          ddim_steps: 50
 
   trainer:
     benchmark: True
-    max_steps: 800
+    max_steps: 15000
