@@ -296,8 +296,12 @@ class DataModuleFromConfig(pl.LightningDataModule):
 
         train_set = self.datasets["train"]
         if 'reg' in self.datasets:
+            print('REG PROVIDED')
             reg_set = self.datasets["reg"]
             train_set = ConcatDataset(train_set, reg_set)
+        else:
+            print('REG NOT PROVIDED')
+            train_set = ConcatDataset(train_set)
 
         return DataLoader(train_set, batch_size=self.batch_size,
                           num_workers=self.num_workers, shuffle=False if is_iterable_dataset else True,
@@ -725,6 +729,8 @@ if __name__ == "__main__":
                 "filename": "{epoch:06}",
                 "verbose": True,
                 "save_last": True,
+                "every_n_epochs": 0,
+                "every_n_train_steps": 10000
             }
         }
         if hasattr(model, "monitor"):

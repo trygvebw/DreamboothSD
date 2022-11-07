@@ -440,6 +440,7 @@ class LatentDiffusion(DDPM):
                  cond_stage_key="image",
                  main_stage_trainable=True,
                  cond_stage_trainable=False,
+                 attention_trainable=True,
                  concat_mode=True,
                  cond_stage_forward=None,
                  conditioning_key=None,
@@ -464,6 +465,7 @@ class LatentDiffusion(DDPM):
         self.concat_mode = concat_mode
         self.cond_stage_trainable = cond_stage_trainable
         self.main_stage_trainable = main_stage_trainable
+        self.attention_trainable = attention_trainable
         self.cond_stage_key = cond_stage_key
 
         try:
@@ -507,6 +509,15 @@ class LatentDiffusion(DDPM):
             for name, module in self.model.named_modules():
                 if type(module).__name__ == 'ResBlock':
                     module.use_checkpoint = False
+            
+            if self.attention_trainable:
+                for name, module in self.model.named_modules():
+                    module_name = type(module).__name__
+                    if module_name in ('CrossAttention', 'SpatialTransformer', 'SpatialSelfAttention', 'LinearAttention'):# and "attn1" in name:
+                        for param in module.parameters():
+                            param.requires_grad = True
+                        if hasattr(module, 'use_checkpoint'):
+                            module.use_checkpoint = True
         
         self.embedding_manager = None
 
@@ -1467,9 +1478,17 @@ class LatentDiffusion(DDPM):
             if self.main_stage_trainable:
                 print(f'{self.__class__.__name__}: Optimizing main stage params')
                 params = params + list(self.model.parameters())
+            else:
+                if self.attention_trainable:
+                    for name, module in self.model.named_modules():
+                        module_name = type(module).__name__
+                        if module_name in ('CrossAttention', 'SpatialTransformer', 'SpatialSelfAttention', 'LinearAttention'):#and "attn1" in name:
+                            params = params + list(module.parameters())
+
             if self.cond_stage_trainable:
                 print(f'{self.__class__.__name__}: Optimizing conditioner params')
                 params = params + list(self.cond_stage_model.parameters())
+
             if self.learn_logvar:
                 print(f'{self.__class__.__name__}: Diffusion model optimizing logvar')
                 params.append(self.logvar)

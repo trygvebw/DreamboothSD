@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 5.0e-08
+  base_learning_rate: 8.0e-06
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     reg_weight: 1.0
@@ -21,7 +21,7 @@ model:
     use_ema: False
     embedding_reg_weight: 0.0
     unfreeze_model: True
-    model_lr: 5.0e-8
+    model_lr: 8.0e-6
 
     personalization_config:
       target: ldm.modules.embedding_manager.EmbeddingManager
@@ -90,7 +90,7 @@ data:
         set: train
         per_image_tokens: false
         repeats: 3
-        flip_p: 0.0 # For photos of people
+        flip_p: 0.5
         interpolation: lanczos
         center_crop: true
     reg:
@@ -108,7 +108,7 @@ data:
         size: 512
         set: val
         per_image_tokens: false
-        repeats: 2
+        repeats: 1
         flip_p: 0.0
         interpolation: lanczos
         center_crop: true
@@ -116,7 +116,7 @@ data:
 lightning:
   modelcheckpoint:
     params:
-      every_n_train_steps: 10000
+      every_n_train_steps: 2500
   callbacks:
     image_logger:
       target: main.ImageLogger
