@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 5.0e-08
+  base_learning_rate: 1.0e-06
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     reg_weight: 1.0
@@ -14,14 +14,14 @@ model:
     channels: 4
     main_stage_trainable: false  # experimental
     cond_stage_trainable: false  # Note: different from the one we trained before
-    attention_trainable: true    # experimental
+    attention_trainable: true   # experimental
+    spec_trainable: false         # experimental
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
     use_ema: False
     embedding_reg_weight: 0.0
     unfreeze_model: True
-    model_lr: 5.0e-8
 
     personalization_config:
       target: ldm.modules.embedding_manager.EmbeddingManager
@@ -81,7 +81,7 @@ data:
   target: main.DataModuleFromConfig
   params:
     batch_size: 1
-    num_workers: 1
+    num_workers: 8
     wrap: false
     train:
       target: ldm.data.personalized.PersonalizedBase
@@ -90,7 +90,7 @@ data:
         set: train
         per_image_tokens: false
         repeats: 3
-        flip_p: 0.0 # For photos of people
+        flip_p: 0.5
         interpolation: lanczos
         center_crop: true
     reg:
@@ -99,8 +99,11 @@ data:
         size: 512
         set: train
         reg: true
+        random_selection: true
         per_image_tokens: false
         repeats: 10
+        sharpen_p: 0.0
+        autocontrast_p: 0.0
         
     validation:
       target: ldm.data.personalized.PersonalizedBase
@@ -108,20 +111,26 @@ data:
         size: 512
         set: val
         per_image_tokens: false
-        repeats: 2
+        repeats: 1
         flip_p: 0.0
+        sharpen_p: 0.0
+        autocontrast_p: 0.0
         interpolation: lanczos
         center_crop: true
 
 lightning:
   modelcheckpoint:
     params:
-      every_n_train_steps: 10000
+      every_n_epochs: 3
   callbacks:
+    metrics_over_trainsteps_checkpoint:
+      target: pytorch_lightning.callbacks.ModelCheckpoint
+      params:
+        every_n_train_steps: 5000
     image_logger:
       target: main.ImageLogger
       params:
-        batch_frequency: 250
+        batch_frequency: 100
         max_images: 16
         increase_log_steps: False
         log_images_kwargs:
@@ -130,3 +139,4 @@ lightning:
   trainer:
     benchmark: True
     max_steps: 50000
+    accumulate_grad_batches: 4

@@ -1,12 +1,16 @@
 import os
+
+from random import sample, randrange
 from typing import OrderedDict
-import numpy as np
+
 import PIL
+import numpy as np
+
 from PIL import Image
-from torch.utils.data import Dataset
 from torchvision import transforms
-from captionizer import caption_from_path, generic_captions_from_path
 from captionizer import find_images
+from torch.utils.data import Dataset
+from captionizer import caption_from_path, generic_captions_from_path
 
 per_img_token_list = [
     'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ', 'ק', 'ר', 'ש', 'ת',
@@ -19,6 +23,8 @@ class PersonalizedBase(Dataset):
                  repeats=100,
                  interpolation="bicubic",
                  flip_p=0.5,
+                 sharpen_p=0.15,
+                 autocontrast_p=0.35,
                  set="train",
                  placeholder_token="dog",
                  per_image_tokens=False,
@@ -26,14 +32,16 @@ class PersonalizedBase(Dataset):
                  mixing_prob=0.25,
                  coarse_class_text=None,
                  token_only=False,
-                 reg=False
+                 reg=False,
+                 shuffle=True,
+                 random_selection=False
                  ):
 
         self.data_root = data_root
 
-        self.image_paths = find_images(self.data_root)
+        image_paths = list(find_images(self.data_root))
+        self.image_paths = sample(image_paths, k=len(image_paths)) if shuffle else image_paths
 
-        # self._length = len(self.image_paths)
         self.num_images = len(self.image_paths)
         self._length = self.num_images
 
@@ -42,6 +50,7 @@ class PersonalizedBase(Dataset):
         self.per_image_tokens = per_image_tokens
         self.center_crop = center_crop
         self.mixing_prob = mixing_prob
+        self.random_selection = random_selection
 
         self.coarse_class_text = coarse_class_text
 
@@ -59,6 +68,8 @@ class PersonalizedBase(Dataset):
                               "lanczos": PIL.Image.LANCZOS,
                               }[interpolation]
         self.flip = transforms.RandomHorizontalFlip(p=flip_p)
+        self.sharpness = transforms.RandomAdjustSharpness(2, p=sharpen_p)
+        self.contrast = transforms.RandomAutocontrast(p=autocontrast_p)
         self.reg = reg
         if self.reg and self.coarse_class_text:
             self.reg_tokens = OrderedDict([('C', self.coarse_class_text)])
@@ -68,6 +79,7 @@ class PersonalizedBase(Dataset):
 
     def __getitem__(self, i):
         example = {}
+        i = randrange(0, self.num_images) if self.random_selection else i
         image_path = self.image_paths[i % self.num_images]
         image = Image.open(image_path)
 

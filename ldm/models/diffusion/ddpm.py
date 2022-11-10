@@ -67,7 +67,6 @@ class DDPM(pl.LightningModule):
                  original_elbo_weight=0.,
                  embedding_reg_weight=0.,
                  unfreeze_model=False,
-                 model_lr=0.,
                  v_posterior=0.,  # weight for choosing posterior variance as sigma = (1-v) * beta_tilde + v * beta
                  l_simple_weight=1.,
                  conditioning_key=None,
@@ -105,7 +104,6 @@ class DDPM(pl.LightningModule):
         self.embedding_reg_weight = embedding_reg_weight
 
         self.unfreeze_model = unfreeze_model
-        self.model_lr = model_lr
 
         if monitor is not None:
             self.monitor = monitor
@@ -441,6 +439,7 @@ class LatentDiffusion(DDPM):
                  main_stage_trainable=True,
                  cond_stage_trainable=False,
                  attention_trainable=True,
+                 spec_trainable=False,
                  concat_mode=True,
                  cond_stage_forward=None,
                  conditioning_key=None,
@@ -466,6 +465,7 @@ class LatentDiffusion(DDPM):
         self.cond_stage_trainable = cond_stage_trainable
         self.main_stage_trainable = main_stage_trainable
         self.attention_trainable = attention_trainable
+        self.spec_trainable = spec_trainable
         self.cond_stage_key = cond_stage_key
 
         try:
@@ -518,6 +518,16 @@ class LatentDiffusion(DDPM):
                             param.requires_grad = True
                         if hasattr(module, 'use_checkpoint'):
                             module.use_checkpoint = True
+            
+            if self.spec_trainable:
+                for name, module in self.model.named_modules():
+                    module_name = type(module).__name__
+                    if module_name == 'CrossAttention':
+                        for inner_name, inner_module in module.named_modules():
+                            inner_module_name = type(inner_module).__name__
+                            if inner_module_name == 'Linear':
+                                for param in inner_module.parameters():
+                                    param.requires_grad = True
         
         self.embedding_manager = None
 
@@ -1470,7 +1480,7 @@ class LatentDiffusion(DDPM):
 
             if self.unfreeze_model: # Are we allowing the base model to train? If so, set two different parameter groups.
                 model_params = list(self.cond_stage_model.parameters()) + list(self.model.parameters())
-                opt = torch.optim.AdamW([{"params": embedding_params, "lr": lr}, {"params": model_params}], lr=self.model_lr)
+                opt = torch.optim.AdamW([{"params": embedding_params, "lr": lr}, {"params": model_params}], lr=lr)
             else: # Otherwise, train only embedding
                 opt = torch.optim.AdamW(embedding_params, lr=lr)
         else:
@@ -1482,8 +1492,17 @@ class LatentDiffusion(DDPM):
                 if self.attention_trainable:
                     for name, module in self.model.named_modules():
                         module_name = type(module).__name__
-                        if module_name in ('CrossAttention', 'SpatialTransformer', 'SpatialSelfAttention', 'LinearAttention'):#and "attn1" in name:
+                        if module_name in ('CrossAttention', 'SpatialTransformer', 'SpatialSelfAttention', 'LinearAttention'):
                             params = params + list(module.parameters())
+                
+                if self.spec_trainable and not self.attention_trainable:
+                    for name, module in self.model.named_modules():
+                        module_name = type(module).__name__
+                        if module_name == 'CrossAttention':
+                            for inner_name, inner_module in module.named_modules():
+                                inner_module_name = type(inner_module).__name__
+                                if inner_module_name == 'Linear':
+                                    params = params + list(inner_module.parameters())
 
             if self.cond_stage_trainable:
                 print(f'{self.__class__.__name__}: Optimizing conditioner params')
@@ -1496,7 +1515,10 @@ class LatentDiffusion(DDPM):
             print(f'Optimizing {len(params)} parameters')
             opt = torch.optim.AdamW(params, lr=lr)
 
-        return opt
+        lr_sched = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[30, 90], gamma=0.15)
+        
+        return [opt], [lr_sched]
+        #return opt
 
     def configure_opt_embedding(self):
         print('CALLED configure_opt_embedding')
@@ -1532,7 +1554,7 @@ class LatentDiffusion(DDPM):
 
         model_params = list(self.cond_stage_model.parameters()) + list(self.model.parameters())
         embedding_params = list(self.embedding_manager.embedding_parameters())
-        return torch.optim.AdamW([{"params": embedding_params, "lr": self.learning_rate}, {"params": model_params}], lr=self.model_lr)
+        return torch.optim.AdamW([{"params": embedding_params, "lr": self.learning_rate}, {"params": model_params}], lr=self.learning_rate)
 
     @torch.no_grad()
     def to_rgb(self, x):

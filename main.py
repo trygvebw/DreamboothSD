@@ -199,6 +199,10 @@ def get_parser(**parser_kwargs):
     parser.add_argument("--init_words", 
         type=str, 
         help="Comma separated list of words used to initialize the embeddigs for training.")
+    
+    parser.add_argument("--vae_checkpoint_file",
+        type=str,
+        help="File to load replacement VAE weights from.")
 
     return parser
 
@@ -249,7 +253,7 @@ class ConcatDataset(Dataset):
         return min(len(d) for d in self.datasets)
     
 class DataModuleFromConfig(pl.LightningDataModule):
-    def __init__(self, batch_size, train=None, reg = None, validation=None, test=None, predict=None,
+    def __init__(self, batch_size, train=None, reg=None, validation=None, test=None, predict=None,
                  wrap=False, num_workers=None, shuffle_test_loader=False, use_worker_init_fn=False,
                  shuffle_val_dataloader=False):
         super().__init__()
@@ -689,6 +693,11 @@ if __name__ == "__main__":
             model = load_model_from_config(config, opt.actual_resume)
         else:
             model = instantiate_from_config(config.model)
+        
+        if opt.vae_checkpoint_file:
+            print(f'Loading replacement VAE from checkpoint file "{opt.vae_checkpoint_file}"')
+            vae_weights = torch.load(opt.vae_checkpoint_file, map_location='cpu')
+            model.first_stage_model.load_state_dict(vae_weights['state_dict'], strict=False)
 
         # trainer and callbacks
         trainer_kwargs = dict()
@@ -729,8 +738,8 @@ if __name__ == "__main__":
                 "filename": "{epoch:06}",
                 "verbose": True,
                 "save_last": True,
-                "every_n_epochs": 0,
-                "every_n_train_steps": 10000
+                "every_n_epochs": 3,
+                "every_n_train_steps": None
             }
         }
         if hasattr(model, "monitor"):
@@ -798,7 +807,7 @@ if __name__ == "__main__":
                          "filename": "{epoch:06}-{step:09}",
                          "verbose": True,
                          'save_top_k': -1,
-                         'every_n_train_steps': 10000,
+                         'every_n_train_steps': 3000,
                          'save_weights_only': True
                      }
                 }
