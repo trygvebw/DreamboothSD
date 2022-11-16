@@ -1515,7 +1515,7 @@ class LatentDiffusion(DDPM):
             print(f'Optimizing {len(params)} parameters')
             opt = torch.optim.AdamW(params, lr=lr)
 
-        lr_sched = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[30, 90], gamma=0.15)
+        lr_sched = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[90, 180], gamma=0.25)
         
         return [opt], [lr_sched]
         #return opt

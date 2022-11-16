@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.0e-06
+  base_learning_rate: 1.0e-07
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     reg_weight: 1.0
@@ -139,4 +139,4 @@ lightning:
   trainer:
     benchmark: True
     max_steps: 50000
-    accumulate_grad_batches: 4
+    accumulate_grad_batches: 1
