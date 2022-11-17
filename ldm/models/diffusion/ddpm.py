@@ -1476,6 +1476,8 @@ class LatentDiffusion(DDPM):
         lr = self.learning_rate
 
         if self.embedding_manager is not None: # If using textual inversion
+            raise Exception('self.embedding_manager was not None')
+            
             embedding_params = list(self.embedding_manager.embedding_parameters())
 
             if self.unfreeze_model: # Are we allowing the base model to train? If so, set two different parameter groups.
@@ -1514,6 +1516,9 @@ class LatentDiffusion(DDPM):
             
             print(f'Optimizing {len(params)} parameters')
             opt = torch.optim.AdamW(params, lr=lr)
+            
+            #from deepspeed.ops.adam import FusedAdam
+            #opt = FusedAdam(params, lr=lr, adam_w_mode=True)
 
         lr_sched = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[90, 180], gamma=0.25)
         

@@ -823,7 +823,14 @@ if __name__ == "__main__":
 
         trainer_kwargs["callbacks"] = [instantiate_from_config(callbacks_cfg[k]) for k in callbacks_cfg]
         trainer_kwargs["max_steps"] = trainer_opt.max_steps
-        trainer_kwargs["plugins"] = PruningCheckpointIO()
+        
+        from pytorch_lightning.plugins import DeepSpeedPlugin
+        
+        trainer_kwargs["plugins"] = [
+            PruningCheckpointIO()
+        ]
+        
+        #trainer_kwargs['strategy'] = 'deepspeed_stage_2_offload'
     
         trainer = Trainer.from_argparse_args(trainer_opt, **trainer_kwargs)
         trainer.logdir = logdir  ###
