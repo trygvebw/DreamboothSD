@@ -161,7 +161,7 @@ class FrozenCLIPEmbedder(AbstractEncoder):
 
         if version is not None and 'openai' not in version:
             CLIPTokenizer.vocab_files_names["merges_file"] = "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt" # to support laion clip
-        
+
         self.tokenizer = CLIPTokenizer.from_pretrained(version)
         self.transformer = CLIPTextModel.from_pretrained(version)
         self.device = device
@@ -189,8 +189,8 @@ class FrozenCLIPEmbedder(AbstractEncoder):
 
                 position_embeddings = self.position_embedding(position_ids)
                 embeddings = inputs_embeds + position_embeddings
-                
-                return embeddings      
+
+                return embeddings
 
         self.transformer.text_model.embeddings.forward = embedding_forward.__get__(self.transformer.text_model.embeddings)
 
@@ -319,7 +319,7 @@ class FrozenCLIPEmbedder(AbstractEncoder):
     def forward(self, text, **kwargs):
         batch_encoding = self.tokenizer(text, truncation=True, max_length=self.max_length, return_length=True,
                                         return_overflowing_tokens=False, padding="max_length", return_tensors="pt")
-        tokens = batch_encoding["input_ids"].to(self.device)        
+        tokens = batch_encoding["input_ids"].to(self.device)
         z = self.transformer(input_ids=tokens, **kwargs)
 
         return z

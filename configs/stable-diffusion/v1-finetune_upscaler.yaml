@@ -19,11 +19,11 @@ model:
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
-    use_ema: false
+    use_ema: False
     embedding_reg_weight: 0.0
     noise_learned_conditioning: false # experimental
-    input_perturbation_scale: 0.5 # experimental
-    noise_offset_scale: 0.1 # experimental
+    input_perturbation_scale: 0.1 # experimental
+    noise_offset_scale: 0 # experimental
     #max_train_timestep: 650 # experimental
 
     personalization_config:
@@ -39,8 +39,8 @@ model:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
         image_size: 32 # unused
-        dropout: 0.10 # note!
-        attn_dropout: 0.10 # experimental
+        dropout: 0.15 # note!
+        attn_dropout: 0.0 # experimental
         in_channels: 4
         out_channels: 4
         model_channels: 320
@@ -49,15 +49,11 @@ model:
         channel_mult: [ 1, 2, 4, 4 ]
         num_heads: 8
         use_spatial_transformer: true
-        disable_flash_attn: true # true for DiffFit
+        disable_flash_attn: true # DiffFit
         transformer_depth: 1
         context_dim: 768
         use_checkpoint: True # should be True if main_stage_trainable is True
         legacy: False
-        use_dropout2d: True # experimental
-        attn_use_dropout2d: False # experimental
-        attn_dropout_only_xattn: True # experimental
-
 
     first_stage_config:
       target: ldm.models.autoencoder.AutoencoderKL
@@ -99,15 +95,14 @@ data:
       target: ldm.data.personalized.ConcatPersonalizedBase
       params:
         size: 512
-        #random_resize_to_min: 128  # Experimental and not working yet
         set: train
         repeats: 1
-        add_flipped_frac: 0.85
+        add_flipped_frac: 0.75
         add_sharpened_frac: 0.0
-        add_autocontrast_frac: 0.10
+        add_autocontrast_frac: 0.15
         add_center_crop_frac: 0.85
         add_rand_rotation_frac: 0.0
-        interpolation: bicubic
+        interpolation: lanczos
         crop_type: random
         shuffle: true
         use_caption_file: true  # Set to false if training a Dreambooth model
@@ -121,7 +116,7 @@ data:
         random_selection: true
         #per_image_tokens: false
         repeats: 1000
-        interpolation: bicubic
+        interpolation: lanczos
         crop_type: center
         shuffle: true
 
@@ -132,7 +127,7 @@ data:
         set: val
         #per_image_tokens: false
         repeats: 1
-        interpolation: bicubic
+        interpolation: lanczos
         crop_type: center
         shuffle: false
         use_caption_file: true  # Set to false if training a Dreambooth model
@@ -140,12 +135,12 @@ data:
 lightning:
   modelcheckpoint:
     params:
-      every_n_epochs: 1
+      every_n_epochs: 3
   callbacks:
     metrics_over_trainsteps_checkpoint:
       target: pytorch_lightning.callbacks.ModelCheckpoint
       params:
-        every_n_epochs: 3  # note! requires a lot of disk space
+        every_n_epochs: 2  # note! requires a lot of disk space
     image_logger:
       target: main.ImageLogger
       params:
@@ -158,6 +153,7 @@ lightning:
           sampler: dpmpp_2m
           unconditional_guidance_scale: 7.5
           #sampler: dpmpp_2m
+
   trainer:
     benchmark: True
     max_steps: 100000

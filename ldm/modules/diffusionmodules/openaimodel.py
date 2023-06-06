@@ -184,6 +184,7 @@ class ResBlock(TimestepBlock):
         out_channels=None,
         use_conv=False,
         use_scale_shift_norm=False,
+        use_dropout2d=False,
         dims=2,
         use_checkpoint=False,
         up=False,
@@ -225,7 +226,7 @@ class ResBlock(TimestepBlock):
         self.out_layers = nn.Sequential(
             normalization(self.out_channels),
             nn.SiLU(),
-            nn.Dropout(p=dropout),
+            nn.Dropout2d(p=dropout) if use_dropout2d else nn.Dropout(p=dropout),
             zero_module(
                 conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1)
             ),
@@ -449,6 +450,10 @@ class UNetModel(nn.Module):
         num_res_blocks,
         attention_resolutions,
         dropout=0,
+        attn_dropout=0,
+        use_dropout2d=False,
+        attn_use_dropout2d=False,
+        attn_dropout_only_xattn=False,
         channel_mult=(1, 2, 4, 8),
         conv_resample=True,
         dims=2,
@@ -462,6 +467,7 @@ class UNetModel(nn.Module):
         resblock_updown=False,
         use_new_attention_order=False,
         use_spatial_transformer=False,    # custom transformer support
+        disable_flash_attn=False,
         transformer_depth=1,              # custom transformer support
         context_dim=None,                 # custom transformer support
         n_embed=None,                     # custom support for prediction of discrete ids into codebook of first stage vq model
@@ -493,6 +499,7 @@ class UNetModel(nn.Module):
         self.num_res_blocks = num_res_blocks
         self.attention_resolutions = attention_resolutions
         self.dropout = dropout
+        self.attn_dropout = attn_dropout
         self.channel_mult = channel_mult
         self.conv_resample = conv_resample
         self.num_classes = num_classes
@@ -535,6 +542,7 @@ class UNetModel(nn.Module):
                         dims=dims,
                         use_checkpoint=use_checkpoint,
                         use_scale_shift_norm=use_scale_shift_norm,
+                        use_dropout2d=use_dropout2d
                     )
                 ]
                 ch = mult * model_channels
@@ -555,7 +563,11 @@ class UNetModel(nn.Module):
                             num_head_channels=dim_head,
                             use_new_attention_order=use_new_attention_order,
                         ) if not use_spatial_transformer else SpatialTransformer(
-                            ch, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim, use_checkpoint=use_checkpoint
+                            ch, num_heads, dim_head,
+                            depth=transformer_depth, context_dim=context_dim,
+                            use_checkpoint=use_checkpoint, disable_flash_attn=disable_flash_attn,
+                            dropout=attn_dropout, use_dropout2d=attn_use_dropout2d,
+                            dropout_only_xattn=attn_dropout_only_xattn
                         )
                     )
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
@@ -574,6 +586,7 @@ class UNetModel(nn.Module):
                             use_checkpoint=use_checkpoint,
                             use_scale_shift_norm=use_scale_shift_norm,
                             down=True,
+                            use_dropout2d=use_dropout2d
                         )
                         if resblock_updown
                         else Downsample(
@@ -602,6 +615,7 @@ class UNetModel(nn.Module):
                 dims=dims,
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
+                use_dropout2d=use_dropout2d
             ),
             AttentionBlock(
                 ch,
@@ -610,7 +624,11 @@ class UNetModel(nn.Module):
                 num_head_channels=dim_head,
                 use_new_attention_order=use_new_attention_order,
             ) if not use_spatial_transformer else SpatialTransformer(
-                            ch, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim, use_checkpoint=use_checkpoint
+                            ch, num_heads, dim_head,
+                            depth=transformer_depth, context_dim=context_dim,
+                            use_checkpoint=use_checkpoint, disable_flash_attn=disable_flash_attn,
+                            dropout=attn_dropout, use_dropout2d=attn_use_dropout2d,
+                            dropout_only_xattn=attn_dropout_only_xattn
                         ),
             ResBlock(
                 ch,
@@ -619,6 +637,7 @@ class UNetModel(nn.Module):
                 dims=dims,
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
+                use_dropout2d=use_dropout2d
             ),
         )
         self._feature_size += ch
@@ -636,6 +655,7 @@ class UNetModel(nn.Module):
                         dims=dims,
                         use_checkpoint=use_checkpoint,
                         use_scale_shift_norm=use_scale_shift_norm,
+                        use_dropout2d=use_dropout2d
                     )
                 ]
                 ch = model_channels * mult
@@ -656,7 +676,11 @@ class UNetModel(nn.Module):
                             num_head_channels=dim_head,
                             use_new_attention_order=use_new_attention_order,
                         ) if not use_spatial_transformer else SpatialTransformer(
-                            ch, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim, use_checkpoint=use_checkpoint
+                            ch, num_heads, dim_head,
+                            depth=transformer_depth, context_dim=context_dim,
+                            use_checkpoint=use_checkpoint, disable_flash_attn=disable_flash_attn,
+                            dropout=attn_dropout, use_dropout2d=attn_use_dropout2d,
+                            dropout_only_xattn=attn_dropout_only_xattn
                         )
                     )
                 if level and i == num_res_blocks:
@@ -671,6 +695,7 @@ class UNetModel(nn.Module):
                             use_checkpoint=use_checkpoint,
                             use_scale_shift_norm=use_scale_shift_norm,
                             up=True,
+                            use_dropout2d=use_dropout2d
                         )
                         if resblock_updown
                         else Upsample(ch, conv_resample, dims=dims, out_channels=out_ch)
@@ -686,10 +711,10 @@ class UNetModel(nn.Module):
         )
         if self.predict_codebook_ids:
             self.id_predictor = nn.Sequential(
-            normalization(ch),
-            conv_nd(dims, model_channels, n_embed, 1),
-            #nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
-        )
+                normalization(ch),
+                conv_nd(dims, model_channels, n_embed, 1),
+                #nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
+            )
 
     def convert_to_fp16(self):
         """
